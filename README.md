@@ -16,6 +16,14 @@ Whenever an **ERROR log appears in the backend application**, the system automat
 
 ---
 
+# Architecture Diagram
+
+![Architecture](images/architecture.png)
+
+---
+
+---
+
 # Architecture
 
 ## High Level Flow
