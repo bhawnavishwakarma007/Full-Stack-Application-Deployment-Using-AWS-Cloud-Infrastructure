@@ -1,0 +1,19 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowCloudWatchToPublish",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "cloudwatch.amazonaws.com"
+      },
+      "Action": "sns:Publish",
+      "Resource": "arn:aws:sns:us-east-1:851725238641:cheetah-dev-be-error-notify",
+      "Condition": {
+        "ArnEquals": {
+          "aws:SourceArn": "arn:aws:cloudwatch:us-east-1:851725238641:alarm:cheetah-dev-error-alarm"
+        }
+      }
+    }
+  ]
+}
