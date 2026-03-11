@@ -9,438 +9,2425 @@ This project was created manually using the AWS Console following a structured, 
 ![Architecture](images/architecture.png)
 
 ---
-
 # 🔷 PHASE 1 — NETWORK SETUP
 
+This phase establishes the foundational networking layer for the entire infrastructure using a multi-AZ, production-ready design.
+
+---
+
 ## 1️⃣ Create VPC
-- Name: dev-vpc  
-- CIDR: 10.0.0.0/16  
-Creates isolated network for entire infrastructure.
+
+### 📌 Configuration
+
+    Name: dev-vpc
+    CIDR Block: 10.0.0.0/16
+
+### 🎯 Purpose
+
+- Creates an isolated virtual network
+- Provides up to 65,536 private IP addresses
+- Forms the base for all infrastructure components
+
+---
 
 ## 2️⃣ Create Subnets (Multi-AZ)
 
-### Public Subnets
-- dev-pub-sub-1 → us-east-1a → 10.0.0.0/24  
-- dev-pub-sub-2 → us-east-1b → 10.0.1.0/24  
-- dev-pub-sub-3 → us-east-1c → 10.0.2.0/24  
+To ensure **high availability**, subnets were distributed across three Availability Zones.
 
-### Private Subnets
-- dev-pvt-sub-1 → us-east-1a → 10.0.3.0/24  
-- dev-pvt-sub-2 → us-east-1b → 10.0.4.0/24  
-- dev-pvt-sub-3 → us-east-1c → 10.0.5.0/24  
+---
 
-Ensures high availability across 3 AZs.
+### 🌍 Public Subnets
 
-## 3️⃣ Internet Gateway
-Attached to VPC for public internet access.
+    dev-pub-sub-1 → us-east-1a → 10.0.0.0/24
+    dev-pub-sub-2 → us-east-1b → 10.0.1.0/24
+    dev-pub-sub-3 → us-east-1c → 10.0.2.0/24
 
-## 4️⃣ NAT Gateway
-- Placed in Public Subnet  
-- Attached Elastic IP  
-Allows private instances outbound internet securely.
+Used for:
+- ALB
+- NAT Gateway
+- Bastion Host
 
-## 5️⃣ Route Tables
-Public:
-    0.0.0.0/0 → IGW  
+---
 
-Private:
-    0.0.0.0/0 → NAT  
+### 🔒 Private Subnets
+
+    dev-pvt-sub-1 → us-east-1a → 10.0.3.0/24
+    dev-pvt-sub-2 → us-east-1b → 10.0.4.0/24
+    dev-pvt-sub-3 → us-east-1c → 10.0.5.0/24
+
+Used for:
+- Frontend EC2
+- Backend EC2
+- RDS Database
+
+---
+
+## 3️⃣ Create Internet Gateway (IGW)
+
+### 📌 Steps
+
+- Create Internet Gateway
+- Attach it to **dev-vpc**
+
+### 🎯 Purpose
+
+Allows **public subnets** to communicate with the internet.
+
+---
+
+## 4️⃣ Create NAT Gateway
+
+### 📌 Configuration
+
+- Created manually
+- Placed in: Public Subnet (1a)
+- Attached: Elastic IP
+
+### 🎯 Purpose
+
+Allows **private instances** to access the internet securely:
+
+- OS updates
+- Package downloads
+- External API calls
+
+Without exposing them publicly.
+
+---
+
+## 5️⃣ Configure Route Tables
+
+---
+
+### 🌐 Public Route Table
+
+    Route:
+    0.0.0.0/0 → Internet Gateway
+
+Attached to:
+
+    dev-pub-sub-1
+    dev-pub-sub-2
+    dev-pub-sub-3
+
+---
+
+### 🔒 Private Route Table
+
+    Route:
+    0.0.0.0/0 → NAT Gateway
+
+Attached to:
+
+    dev-pvt-sub-1
+    dev-pvt-sub-2
+    dev-pvt-sub-3
+
+---
+
+## 🔄 Network Traffic Flow
+
+### Public Subnet Traffic
+
+    Public EC2 / ALB
+           ↓
+    Internet Gateway
+           ↓
+    Internet
+
+### Private Subnet Traffic
+
+    Private EC2
+           ↓
+    NAT Gateway
+           ↓
+    Internet Gateway
+           ↓
+    Internet
+
+---
 
 ## 6️⃣ Enable VPC Flow Logs
-Used for traffic monitoring and debugging.
+
+Enabled **VPC Flow Logs** to:
+
+- Monitor inbound and outbound traffic
+- Analyze network behavior
+- Debug connectivity issues
+- Improve visibility and security auditing
 
 ---
 
 # 🔷 PHASE 2 — SECURITY GROUP DESIGN (LAYERED SECURITY)
 
-## 7️⃣ Security Groups Created
+Security was designed using a strict **layered architecture**.
 
-ALB SG  
-- HTTP 80 → 0.0.0.0/0  
+Each layer communicates only with the required upstream/downstream component.
 
-Frontend SG  
-- TCP 8501 → From ALB SG  
+---
 
-NLB SG  
-- TCP 80 → From Frontend SG  
+## 7️⃣ Create Security Groups
 
-Backend SG  
-- TCP 8084 → From NLB SG  
+---
 
-RDS SG  
-- Port 3306 → From Backend SG  
+### 🌐 ALB Security Group
 
-Ensures strict service-to-service communication.
+    HTTP (80) → 0.0.0.0/0
+
+Allows public internet traffic to reach the ALB only.
+
+---
+
+### 🖥 Frontend Security Group
+
+    TCP 8501 → Source: ALB Security Group
+
+Allows traffic only from the ALB.
+
+---
+
+### 🔁 NLB Security Group
+
+    TCP 80 → Source: Frontend Security Group
+
+Allows internal traffic from Frontend only.
+
+---
+
+### ⚙ Backend Security Group
+
+    TCP 8084 → Source: NLB Security Group
+
+Backend is not publicly accessible.
+
+---
+
+### 🗄 RDS Security Group
+
+    MySQL / Aurora → Port 3306
+    Source → Backend Security Group
+
+Database access is strictly limited to backend services.
+
+---
+
+## 🔐 Layered Security Architecture
+
+    Internet
+       ↓
+    ALB (Public)
+       ↓
+    Frontend EC2
+       ↓
+    Internal NLB
+       ↓
+    Backend EC2
+       ↓
+    RDS
 
 ---
 
 # 🔷 PHASE 3 — DATABASE CONFIGURATION
 
-## 8️⃣ DB Subnet Group
-Included all private subnets (Multi-AZ).
+This phase focuses on deploying a secure, production-ready relational database inside private subnets.
 
-## 9️⃣ RDS Instance
-- Engine: MySQL/Aurora  
-- Public Access: Disabled  
-- Encryption: Enabled (KMS)  
-- Logging: Enabled  
+---
 
-### Encryption
-- At Rest  
-- In Transit  
+## 8️⃣ Create DB Subnet Group
+
+### 📌 Included Subnets
+
+    Private Subnet 1a
+    Private Subnet 1b
+    Private Subnet 1c
+
+### 🎯 Purpose
+
+- Enables **Multi-AZ deployment**
+- Ensures high availability
+- Allows automatic failover across Availability Zones
+- Keeps database inside private network
+
+---
+
+## 9️⃣ Create RDS Instance
+
+### 📌 Configuration
+
+    Engine: MySQL / Aurora
+    Public Access: Disabled
+    Subnet Group: Private Subnets
+    Security Group: RDS SG
+    Logging: Enabled
+    Encryption: Enabled (KMS)
+
+---
+
+### 🔐 Security Design
+
+- Database is NOT publicly accessible
+- Only backend security group can access port 3306
+- Logging enabled for monitoring
+- Encryption enabled for compliance and data protection
+
+---
+
+## 🔐 Encryption Configuration
+
+### 🔒 Encryption at Rest
+
+- Data is encrypted before being written to storage
+- Protects against unauthorized disk-level access
+- Uses AWS KMS
+
+---
+
+### 🔁 Encryption in Transit
+
+- Data is encrypted while moving between services
+- Protects credentials and queries
+- Uses SSL/TLS
+
+---
+
+## 🔄 Database Access Flow
+
+    Backend EC2
+         ↓
+    RDS (Private Subnet)
+         ↓
+    Encrypted Storage
 
 ---
 
 # 🔷 PHASE 4 — ACCESS MANAGEMENT & SECRETS
 
-## 🔟 Systems Manager (SSM)
-Access EC2 in private subnet securely.  
-No Bastion required.
-
-## 1️⃣1️⃣ Parameter Store
-Stored:
-- /cheetah/dev/mysql/host  
-- /cheetah/dev/mysql/username  
-- /cheetah/dev/mysql/password (SecureString + KMS)
-
-Prevents hardcoded credentials.
+This phase focuses on secure instance access and secret management.
 
 ---
 
-# 🔷 PHASE 5 — S3 ARTIFACT STORAGE
+## 🔟 Configure Systems Manager (SSM) Access
 
-## 1️⃣2️⃣ S3 Bucket
-Uploaded backend JAR file for EC2 deployment.
+You configured **AWS Systems Manager (SSM)** to access EC2 instances securely.
+
+### 🎯 Benefits
+
+- No Bastion Host required
+- No public IP required
+- Secure shell access via IAM
+- Encrypted session management
+- Full audit logging
+
+---
+
+### 🔄 Access Flow Using SSM
+
+    Developer
+        ↓
+    AWS Console / CLI
+        ↓
+    Systems Manager
+        ↓
+    Private EC2 Instance
+
+This removes the need for SSH over the internet.
+
+---
+
+## 1️⃣1️⃣ Create Parameters in Systems Manager (Parameter Store)
+
+You securely stored database credentials using **Parameter Store**.
+
+---
+
+### 📦 Parameters Created
+
+---
+
+### (i) Database Host
+
+    Name: /cheetah/dev/mysql/host
+    Type: String
+    Value: RDS Endpoint
+
+---
+
+### (ii) Database Username
+
+    Name: /cheetah/dev/mysql/username
+    Type: String
+    Value: admin
+
+---
+
+### (iii) Database Password
+
+    Name: /cheetah/dev/mysql/password
+    Type: SecureString
+    Encryption: KMS
+    Value: RDS Password
+
+---
+
+## 🔐 Why This Is Secure
+
+- ✔ No hardcoded credentials in application code
+- ✔ Password stored as SecureString
+- ✔ Encrypted using KMS
+- ✔ IAM-based access control
+- ✔ Centralized secret management
+
+---
+
+## 🔄 Secure Credential Retrieval Flow
+
+    Application
+         ↓
+    IAM Role
+         ↓
+    Parameter Store
+         ↓
+    Decrypted value (if authorized)
+
+Only instances with proper IAM permissions can retrieve the secrets.
+
+---
+
+# 🔷 PHASE 5 — APPLICATION ARTIFACT STORAGE
+
+This phase prepares centralized storage for application artifacts used during deployment.
+
+---
+
+## 1️⃣2️⃣ Create S3 Bucket
+
+### 📌 Actions Performed
+
+- Created an **S3 bucket**
+- Uploaded:
+
+      Backend JAR file
+
+### 🎯 Purpose
+
+- Store application artifacts securely
+- Allow EC2 instances to download code during bootstrapping
+- Enable automated deployments via user data or scripts
+- Maintain centralized artifact management
+
+---
+
+## 🔄 Artifact Deployment Flow
+
+    S3 Bucket
+        ↓
+    EC2 Instance (via IAM Role)
+        ↓
+    Backend Application Starts
+
+EC2 retrieves the JAR file during initialization.
 
 ---
 
 # 🔷 PHASE 6 — IAM ROLE FOR EC2
 
-## 1️⃣3️⃣ IAM Role Attached
-Policies:
-- AmazonSSMManagedInstanceCore  
-- CloudWatchAgentServerPolicy  
-- S3 Access  
-- Custom Policy:
-    ssm:GetParameter  
-    kms:Decrypt  
+This phase ensures EC2 instances have secure, least-privilege access to required AWS services.
+
+---
+
+## 1️⃣3️⃣ Create IAM Role (For EC2)
+
+### 📌 AWS Managed Policies Attached
+
+- AmazonSSMManagedInstanceCore
+- S3 Full Access
+- CloudWatchAgentServerPolicy
+
+These allow:
+
+- SSM access
+- S3 artifact download
+- CloudWatch logging
+
+---
+
+## 🔐 Custom Policy Created
+
+### 📌 Permissions Added
+
+    ssm:GetParameter
+    kms:Decrypt
+
+### 🎯 Purpose
+
+- Retrieve database credentials from Parameter Store
+- Decrypt SecureString values encrypted with KMS
+
+The custom policy was attached to the EC2 IAM Role.
+
+---
+
+## 🔄 IAM Role Capability Summary
+
+The EC2 instance can now:
+
+- ✔ Fetch secure DB credentials
+- ✔ Access S3 bucket artifacts
+- ✔ Allow SSM login (no SSH required)
+- ✔ Publish logs to CloudWatch
+- ✔ Decrypt encrypted parameters via KMS
 
 ---
 
 # 🔷 PHASE 7 — BACKEND DEPLOYMENT TEST
 
-## 1️⃣4️⃣ Launch Test EC2
-- t2.medium  
-- Private Subnet  
-- Backend SG  
-- IAM Role attached  
-
-Used for manual validation.
+Before automating deployment with Launch Templates and Auto Scaling, you performed a manual validation.
 
 ---
 
-# 🔷 PHASE 8 — BACKEND LAUNCH TEMPLATE
+## 1️⃣4️⃣ Launch EC2 Instance (Testing)
 
-## 1️⃣5️⃣ Launch Template
-User Data Script:
-- Install Java  
-- Download JAR  
-- Fetch DB credentials  
-- Start Spring Boot app  
+### 📌 Configuration
 
----
-
-# 🔷 PHASE 9 — BACKEND TARGET GROUP
-
-## 1️⃣6️⃣ Target Group
-- TCP 8084  
-Health Check:
-- HTTP  
-- Port Override: 8084  
-- Success: 200–499  
+    Instance Type: t2.medium
+    Subnet: Private Subnet 2
+    IAM Role: Attached
+    Security Group: Backend SG
 
 ---
 
-# 🔷 PHASE 10 — BACKEND LOAD BALANCING & ASG
+### 🎯 Purpose of This Test Instance
 
-## 1️⃣7️⃣ Internal NLB
-- Internal  
-- Multi-AZ  
-- Listener TCP 80  
-
-## 1️⃣8️⃣ Backend ASG
-- Launch Template attached  
-- Private Subnets  
-- Health Check: ELB  
-- Desired Capacity: 1  
+- Verify IAM role permissions
+- Test Parameter Store access
+- Validate S3 artifact download
+- Confirm backend application starts successfully
+- Ensure DB connectivity works
+- Debug issues before automation
 
 ---
 
-# 🔷 PHASE 11 — INSTANCE VERIFICATION
+## 🔄 Manual Testing Flow
 
-## 1️⃣9️⃣ Validate via SSM
+    EC2 (Private Subnet)
+         ↓
+    Retrieve DB credentials from Parameter Store
+         ↓
+    Download JAR from S3
+         ↓
+    Start Backend Application
+         ↓
+    Connect to RDS (Port 3306)
 
-Commands:
+---
+# 🔷 PHASE 8 — CREATE LAUNCH TEMPLATE (BACKEND)
+
+This phase automates backend instance provisioning using a Launch Template.
+
+---
+
+## 1️⃣5️⃣ Create Launch Template
+
+### 📌 Configuration
+
+    Instance Type: t2.medium
+    Key Pair: Attached
+    Security Group: Backend SG
+    IAM Role: Attached
+    User Data: Added
+
+---
+
+## 🧾 User Data Responsibilities
+
+The User Data script automatically:
+
+- Install Java
+- Download JAR file from S3
+- Fetch DB credentials from SSM Parameter Store
+- Decrypt password using KMS
+- Start Spring Boot application on:
+
+      Port 8084
+
+---
+
+## 🔄 Backend Boot Flow
+
+    EC2 Launch
+        ↓
+    Install Java
+        ↓
+    Download Backend JAR (S3)
+        ↓
+    Fetch DB Credentials (SSM)
+        ↓
+    Start Spring Boot App (8084)
+
+This ensures fully automated backend deployment.
+
+---
+
+# 🔷 PHASE 9 — CREATE TARGET GROUP (BACKEND)
+
+The Target Group monitors backend instance health.
+
+---
+
+## 1️⃣6️⃣ Create Target Group
+
+### 📌 Configuration
+
+    Protocol: TCP
+    Port: 8084
+
+### 🏥 Health Check Configuration
+
+    Protocol: HTTP
+    Port: Override → 8084
+    Success Code: 200–499
+
+---
+
+### 🎯 Purpose
+
+- Confirms backend application is running
+- Ensures only healthy instances receive traffic
+- Integrates with Load Balancer and ASG
+
+---
+
+# 🔷 PHASE 10 — BACKEND LOAD BALANCING & AUTO SCALING
+
+This phase ensures backend scalability and high availability.
+
+---
+
+## 1️⃣7️⃣ Create Internal Network Load Balancer (NLB)
+
+### 📌 Configuration
+
+    Type: Internal
+    Subnets: Private Subnet 1 & 2 (Multi-AZ)
+    Listener: TCP 80
+    Forward to: Backend Target Group
+
+---
+
+### 🎯 Purpose
+
+- Exposes backend only inside VPC
+- No public internet access
+- Used by frontend instances internally
+
+---
+
+## 🔄 Backend Traffic Flow
+
+    Frontend EC2
+         ↓
+    Internal NLB (Private)
+         ↓
+    Backend Target Group
+         ↓
+    Backend EC2 Instances
+
+---
+
+## 1️⃣8️⃣ Create Backend Auto Scaling Group (ASG)
+
+### 📌 Configuration
+
+    Launch Template: Backend LT
+    Subnets: Private Subnet 1 & 2
+    Attach to: Backend Target Group
+    Health Check Type: ELB
+    Desired Capacity: 1
+
+---
+
+### 🛡 Health Check Behavior
+
+- Target Group checks backend process
+- If unhealthy → ASG terminates instance
+- New instance launched automatically
+
+---
+
+# 🔷 PHASE 11 — INSTANCE VERIFICATION & LOG CHECK
+
+After deployment, manual verification was performed.
+
+---
+
+## 1️⃣9️⃣ Connect via SSM
+
+Used **Systems Manager Session Manager** to log into private EC2.
+
+No public IP or SSH required.
+
+---
+
+## 🔎 Commands Used
+
+### Check Java Process
 
     ps -aux | grep java
+
+### Check Application Logs
+
     cd /var/log/app
     cat datastore.log
+
+### Kill Process (Health Check Testing)
+
     kill <PID>
 
-Confirmed:
-- Health check working  
-- ASG replaces unhealthy instances  
+---
+
+## 🔄 Health Check Validation Flow
+
+    Kill Backend Process
+           ↓
+    Target Group Marks Unhealthy
+           ↓
+    ASG Terminates Instance
+           ↓
+    New Instance Launched
+           ↓
+    Application Restored
 
 ---
 
-# 🔷 PHASE 12 — CLOUDWATCH MONITORING
+# 🔷 PHASE 12 — MONITORING SETUP (CloudWatch)
 
-## 2️⃣0️⃣ Log Group
-Application logs shipped to CloudWatch.
-
-## 2️⃣1️⃣ Metric Filter
-Pattern:
-    ERROR  
-
-Metric:
-- Namespace: be-cw-ns  
-- Metric: log-error  
-
-## 2️⃣2️⃣ CloudWatch Alarm
-- Period: 1 minute  
-- Threshold ≥ 1  
-- Action → SNS  
-
-Real-time backend error detection.
+This phase establishes real-time monitoring and alerting for backend application errors.
 
 ---
 
-# 🔷 PHASE 13 — SNS & LAMBDA ALERTING
+## 2️⃣0️⃣ Create CloudWatch Log Group
 
-## 2️⃣3️⃣ SNS Topic
-Standard topic for backend-error.
+### 📌 Configuration
 
-Restricted publish access to CloudWatch Alarm ARN.
+    Log Level: INFO
+    Log Group Name: /datastore/app
 
-## 2️⃣4️⃣ Lambda Function
-- Python 3.12  
-- Trigger: SNS  
-- Sends Slack alert  
+### 🎯 Purpose
 
-## 2️⃣5️⃣ SNS Subscription
-Protocol: Lambda  
+- Store backend application logs
+- Centralize log visibility
+- Enable metric filters and alarms
 
-Flow:
-CloudWatch → SNS → Lambda → Slack  
+All application logs are shipped to:
+
+    /datastore/app
+
+---
+
+## 2️⃣1️⃣ Create Metric Filter
+
+Inside the CloudWatch Log Group, a metric filter was created.
+
+### 📌 Filter Pattern
+
+    ERROR
+
+### 📊 Metric Details
+
+    Namespace: be-cw-ns
+    Metric Name: log-error
+    Metric Value: 1
+
+---
+
+### 🎯 Purpose
+
+Whenever the word:
+
+    ERROR
+
+appears in the logs:
+
+- The metric `log-error` increments by 1
+- Enables automated monitoring of backend failures
+
+---
+
+## 2️⃣2️⃣ Create CloudWatch Alarm
+
+### 📌 Configuration
+
+    Metric: log-error
+    Statistic: Sum
+    Period: 1 minute
+    Threshold: ≥ 1
+    Condition: Greater than or equal to 1
+
+### 🚨 Action
+
+- Send notification to SNS
+- Custom alarm name configured
+
+---
+
+### 🎯 Result
+
+Ensures real-time backend error detection within 1 minute.
+
+---
+
+# 🔷 PHASE 13 — SNS & LAMBDA INTEGRATION (ALERTING PIPELINE)
+
+This phase builds the automated alert pipeline.
+
+---
+
+## 2️⃣3️⃣ Create SNS Topic
+
+### 📌 Configuration
+
+    Type: Standard
+    Name: backend-error-topic
+
+---
+
+### 🔐 SNS Access Policy
+
+Configured access policy to restrict who can publish.
+
+Allowed:
+
+    cloudwatch.amazonaws.com
+
+Condition:
+
+    Source ARN = Specific CloudWatch Alarm ARN
+
+---
+
+### 🎯 Security Benefit
+
+- Only your CloudWatch alarm can publish messages
+- Prevents unauthorized notifications
+
+---
+
+## 2️⃣4️⃣ Create Lambda Function
+
+### 📌 Configuration
+
+    Runtime: Python 3.12
+    Purpose: Send Slack notification
+    Trigger: SNS
+
+While creating Lambda:
+
+- Added test event (SNS event structure)
+- Configured execution role with:
+  - Basic Lambda execution permissions
+
+---
+
+## 2️⃣5️⃣ Create SNS Subscription
+
+### 📌 Configuration
+
+    Protocol: Lambda
+    Endpoint: Created Lambda Function
+
+---
+
+## 🔄 Alert Flow (Backend Error)
+
+    CloudWatch Alarm
+          ↓
+    SNS Topic
+          ↓
+    Lambda Function
 
 ---
 
 # 🔷 PHASE 14 — SLACK INTEGRATION
 
+This phase connects AWS alerts to Slack for instant notifications.
+
+---
+
 ## 2️⃣6️⃣ Create Slack App
-- Enabled Incoming Webhooks  
-- Generated Webhook URL  
 
-## 2️⃣7️⃣ Lambda Environment Variable
-    slackHookUrl = <Webhook>
+### 📌 Steps Followed
 
-Instant Slack alerts on backend errors.
+1. Go to:
 
----
+       https://api.slack.com/apps
 
-# 🔷 PHASE 15 — ASG LIFECYCLE UNDERSTANDING
-
-## 2️⃣8️⃣ EC2 Lifecycle
-Pending → Running → Terminating → Terminated  
-
-## 2️⃣9️⃣ ASG Lifecycle
-Launch → Pending → Pending:Wait → Pending:Proceed → InService → Terminating → Terminated  
+2. Click **Create App → From Scratch**
+3. Select Workspace
+4. Enable **Incoming Webhooks**
+5. Add New Webhook
+6. Select Channel
+7. Copy the Webhook URL
 
 ---
 
-# 🔷 PHASE 16 — LIFECYCLE HOOK IMPLEMENTATION
+## 2️⃣7️⃣ Configure Lambda Environment Variable
 
-## 3️⃣0️⃣ Problem
-Instance entering InService before app ready.
+Inside Lambda configuration:
 
-## 3️⃣1️⃣ Lifecycle Hook
-- EC2_INSTANCE_LAUNCHING  
-- Heartbeat: 3600s  
-- Default: ABANDON  
+    Environment Variable:
+    slackHookUrl = <Slack Webhook URL>
 
-Ensures user data completion before traffic routing.
+The Lambda function uses this URL to send formatted alert messages.
 
 ---
 
-# 🔷 PHASE 17 — SCHEDULED SCALING
+# 🔔 FINAL ALERT FLOW
 
-## 3️⃣2️⃣ Concept
-Scale up during day, down at night.
+Whenever:
 
-## 3️⃣3️⃣ Scale Up
-    0 6 * * 1-5  
+    Application logs contain the word: ERROR
 
-## 3️⃣4️⃣ Scale Down
-    30 19 * * 1-5  
+Then:
 
-Cost optimization strategy.
-
----
-
-# 🔷 PHASE 18 — STORAGE OPTIMIZATION
-
-## 3️⃣5️⃣ EBS Optimization
-Changed gp3 → gp2 for cost control.
+1. CloudWatch Log Metric Filter detects it
+2. Metric increases
+3. CloudWatch Alarm triggers
+4. SNS Topic receives notification
+5. SNS triggers Lambda
+6. Lambda sends formatted message to Slack
+7. Slack channel receives alert instantly
 
 ---
 
-# 🔷 PHASE 19 — CHALLENGES & SOLUTIONS
+# 🔷 COMPLETE MONITORING PIPELINE
 
-## 3️⃣6️⃣ Issues Faced
-- User data not executing  
-- IAM permission denied  
-- Health check failures  
-- Cron expression error  
-
-Resolved using logs, proper IAM, lifecycle hooks, and correct cron format.
-
----
-
-# 🔷 PHASE 20 — SYSTEMD SERVICE
-
-## 3️⃣7️⃣ Created systemd service
-- Auto start on reboot  
-- Restart on failure  
-- Background process  
-
-Production-grade reliability.
+    Backend Application Logs
+            ↓
+    CloudWatch Log Group
+            ↓
+    Metric Filter (ERROR)
+            ↓
+    CloudWatch Alarm
+            ↓
+    SNS Topic
+            ↓
+    Lambda Function
+            ↓
+    Slack Channel
 
 ---
 
+# 🔷 PHASE 15 — AUTO SCALING LIFECYCLE UNDERSTANDING
+
+Before final optimization, you studied how Auto Scaling Groups (ASG) manage EC2 instance states.
+
+---
+
+## 2️⃣8️⃣ EC2 Instance State Flow (Standalone EC2)
+
+Normal EC2 lifecycle:
+
+    Pending  
+       ↓  
+    Running  
+       ↓  
+    Terminating  
+       ↓  
+    Terminated  
+
+This is the basic lifecycle when EC2 is not managed by an ASG.
+
+---
+
+## 2️⃣9️⃣ Auto Scaling Group Instance Flow
+
+When EC2 is managed by an ASG, additional lifecycle states are introduced.
+
+    Launch
+       ↓
+    Pending
+       ↓
+    Pending:Wait
+       ↓
+    Pending:Proceed
+       ↓
+    InService
+       ↓
+    Terminating
+       ↓
+    Terminating:Wait
+       ↓
+    Terminating:Proceed
+       ↓
+    Terminated
+
+These extra states allow deeper lifecycle control.
+
+---
+
+## 🔷 InService State
+
+An instance enters **InService** when:
+
+- Target Group health check passes
+- EC2 instance is marked healthy
+
+Only after reaching:
+
+    InService
+
+does the Load Balancer start routing traffic to it.
+
+---
+
+# 🔷 Lifecycle Hooks
+
+Lifecycle hooks allow you to pause instances during:
+
+- Launch phase
+- Termination phase
+
+Instead of immediately transitioning, ASG can temporarily halt the process.
+
+---
+
+## 🔹 Two Types of Lifecycle Hooks
+
+---
+
+### 1️⃣ Launch Lifecycle Hook
+
+Flow:
+
+    Launch  
+       ↓  
+    Pending  
+       ↓  
+    Pending:Wait   ← Hook executes here  
+       ↓  
+    Pending:Proceed  
+       ↓  
+    InService  
+
+### 🎯 Use Cases
+
+- Wait until user-data fully completes
+- Validate application startup
+- Run custom initialization scripts
+- Ensure readiness before receiving traffic
+
+---
+
+### 2️⃣ Termination Lifecycle Hook
+
+Flow:
+
+    Terminating  
+       ↓  
+    Terminating:Wait   ← Hook executes here  
+       ↓  
+    Terminating:Proceed  
+       ↓  
+    Terminated  
+
+### 🎯 Use Cases
+
+- Drain active connections
+- Upload logs
+- Perform graceful shutdown
+- Notify monitoring systems
+
+---
+
+# 🔷 PHASE 16 — IMPLEMENTING LIFECYCLE HOOK
+
+After understanding ASG states, you implemented a Launch Lifecycle Hook.
+
+---
+
+## 3️⃣0️⃣ Problem Scenario
+
+If:
+
+- User data script is not fully executed
+- Application is not ready
+- But ASG continues lifecycle
+
+Then instance may:
+
+- Move to **InService** too early
+- Fail health checks
+- Behave unpredictably
+- Cause repeated instance replacement
+
+---
+
+## 3️⃣1️⃣ Create Lifecycle Hook (Launch Phase)
+
+### 📌 Configuration
+
+    Lifecycle Transition: EC2_INSTANCE_LAUNCHING
+    Heartbeat Timeout: 3600 seconds
+    Default Result: ABANDON
+
+---
+
+### 🛡 Meaning of Configuration
+
+If:
+
+- User data does not complete within 3600 seconds
+
+Then:
+
+- ASG will **abandon the launch**
+- Instance will not move to InService
+
+This prevents unstable instances from serving traffic.
+
+---
+
+## 🔹 Why Heartbeat is Important
+
+If user data completes successfully before timeout:
+
+Instance must send:
+
+    CompleteLifecycleAction
+
+This moves instance from:
+
+    Pending:Wait
+           ↓
+    Pending:Proceed
+           ↓
+    InService
+
+Without this action:
+
+- Instance may remain stuck in Pending state
+- Or eventually be abandoned
+
+---
+
+# 🔷 PHASE 17 — SCHEDULED SCALING (COST OPTIMIZATION)
+
+After backend stability, you implemented scheduled scaling for cost optimization.
+
+---
+
+## 3️⃣2️⃣ Scheduled Action Concept
+
+Used to:
+
+- Scale up during working hours
+- Scale down at night
+- Reduce unnecessary compute cost
+
+---
+
+## 3️⃣3️⃣ Scheduled Action — Scale Up (Morning)
+
+### 📌 Configuration
+
+    Desired Capacity: 1
+    Min: 1
+    Max: 2
+
+### 🕒 Recurrence (Cron)
+
+    0 6 * * 1-5
+
+### 📖 Meaning
+
+- Scale up at **6:00 AM**
+- Monday to Friday
+
+---
+
+## 3️⃣4️⃣ Scheduled Action — Scale Down (Night)
+
+### 📌 Configuration
+
+    Desired Capacity: 0
+    Min: 0
+    Max: 1
+
+### 🕒 Recurrence (Cron)
+
+    30 19 * * 1-5
+
+### 📖 Meaning
+
+- Scale down at **7:30 PM**
+- Monday to Friday
+
+---
+
+# 🔷 Cost Management Strategy
+
+This ensures:
+
+- Infrastructure runs during business hours
+- Instances stop during non-working hours
+- Reduced EC2 and load balancer cost
+- Optimized AWS billing
+- Efficient resource utilization
+
+---
+
+## 🔄 Operational Timeline (Weekdays)
+
+    06:00 AM  → Backend scales up
+    Daytime   → Application serves traffic
+    07:30 PM  → Backend scales down
+    Night     → No compute cost
+
+---
+
+# 🔷 PHASE 18 — STORAGE OPTIMIZATION (EBS)
+
+This phase focused on optimizing storage cost while maintaining required performance.
+
+---
+
+## 3️⃣5️⃣ EBS Volume Optimization
+
+### 📌 Initial Configuration
+
+    Volume Type: gp3
+
+### 🔄 Updated Configuration
+
+    Volume Type: gp2
+
+---
+
+### 🎯 Purpose
+
+- Reduce storage cost
+- Maintain sufficient IOPS for application workload
+- Optimize infrastructure expenses
+
+Since the workload did not require provisioned IOPS tuning, switching to **gp2** provided a cost-effective alternative.
+
+---
+
+## 💰 Cost Optimization Strategy
+
+- Avoid over-provisioned storage
+- Match volume performance to actual workload
+- Reduce recurring AWS billing
+
+---
+
+# 🔷 PHASE 19 — CHALLENGES FACED & SOLUTIONS
+
+During implementation, multiple real-world issues were encountered and resolved.
+
+---
+
+## 3️⃣6️⃣ Challenges During Project Implementation
+
+---
+
+### 1️⃣ User Data Not Executing Properly
+
+#### ❌ Problem
+
+- Application not starting
+- Instance marked unhealthy
+- Target Group failing health checks
+
+#### 🔎 Investigation
+
+Checked cloud-init logs:
+
+    /var/log/cloud-init-output.log
+
+---
+
+#### ✅ Solution
+
+- Added proper logging inside user data
+- Validated script syntax
+- Ensured correct IAM permissions
+- Implemented Lifecycle Hook to delay InService state
+
+Result:
+
+- Application fully initialized before receiving traffic
+
+---
+
+### 2️⃣ IAM Permission Issues
+
+#### ❌ Problem
+
+- EC2 unable to fetch parameters from SSM
+- S3 access denied
+- KMS decryption failed
+
+---
+
+#### ✅ Solution
+
+Added required permissions:
+
+    ssm:GetParameter
+    kms:Decrypt
+    S3 access policy
+
+Also verified:
+
+- Trust relationship
+- EC2 configured as trusted entity
+
+Result:
+
+- Secure parameter retrieval successful
+- Artifact download working properly
+
+---
+
+### 3️⃣ Health Check Failures
+
+#### ❌ Problem
+
+- Target Group marking backend instance unhealthy
+
+---
+
+#### ✅ Solution
+
+Configured:
+
+    Health Check Protocol: HTTP
+    Override Port: 8084
+    Success Code: 200–499
+
+Verified application process manually:
+
+    ps -aux | grep java
+
+Result:
+
+- Health checks passed
+- Instance moved to InService
+
+---
+
+### 4️⃣ Scheduled Scaling Cron Error
+
+#### ❌ Problem
+
+- Incorrect cron expression format
+- Scheduled action not triggering
+
+---
+
+#### ✅ Solution
+
+- Used proper 5-field cron format
+- Removed invalid spacing
+- Verified weekday configuration
+
+Result:
+
+- Scheduled scaling working correctly
+
+---
+
+# 🔷 PHASE 20 — SYSTEMD SERVICE CONFIGURATION (FRONTEND / BACKEND)
+
+To improve reliability, applications were configured as systemd services.
+
+---
+
+## 3️⃣7️⃣ Create Systemd Service
+
+Instead of manually running the application:
+
+    java -jar app.jar
+
+A systemd service was created.
+
+---
+
+## 🎯 What systemd Provides
+
+- Auto-start on reboot
+- Automatic restart on failure
+- Runs application in background
+- Centralized service management
+- Proper process lifecycle handling
+
+---
+
+## 🔄 Service Lifecycle
+
+    System Boot
+        ↓
+    systemd Starts Service
+        ↓
+    Application Runs in Background
+        ↓
+    Failure?
+        ↓
+    systemd Automatically Restarts
+
+---
 # 🔷 PHASE 21 — CLOUDWATCH DASHBOARD
 
-## 3️⃣8️⃣ Dashboard Widgets
-- CPU Utilization  
-- Network In/Out  
-- Healthy Hosts  
-- Alarm Status  
+To gain centralized visibility into infrastructure health and performance, a CloudWatch Dashboard was created.
 
-Centralized monitoring.
+---
+
+## 3️⃣8️⃣ Create CloudWatch Dashboard
+
+### 📊 Widgets Added
+
+The following widgets were configured:
+
+    CPU Utilization
+    Network In / Network Out
+    Target Group Healthy Hosts
+    Alarm Status
+
+---
+
+## 🎯 Purpose of Dashboard
+
+Provides a single-pane monitoring view for:
+
+- Application health
+- Instance performance
+- Auto Scaling behavior
+- Error trends
+- Load Balancer target health
+- Alarm activity status
+
+---
+
+## 🔄 Monitoring Overview
+
+    EC2 Metrics
+         ↓
+    Target Group Health
+         ↓
+    CloudWatch Metrics
+         ↓
+    Dashboard Widgets
+         ↓
+    Visual Monitoring
+
+---
+
+## 📈 What You Can Observe
+
+- CPU spikes during load
+- Network traffic patterns
+- Healthy vs unhealthy instances
+- Alarm trigger frequency
+- Scaling activity patterns
+
+---
+
+## ✅ Benefits
+
+- Real-time infrastructure visibility
+- Faster troubleshooting
+- Performance trend tracking
+- Proactive monitoring
+- Operational awareness
 
 ---
 
 # 🔷 PHASE 22 — TESTING & VALIDATION
 
-## 3️⃣9️⃣ Test EC2
-Validated:
+Before finalizing infrastructure automation, manual validation was performed.
+
+---
+
+## 3️⃣9️⃣ Create Test EC2 Instance
+
+A temporary EC2 instance was launched for verification.
+
+### 🎯 Purpose
+
+- Validate user data script execution
+- Verify IAM role permissions
+- Confirm S3 access
+- Confirm Parameter Store access
+- Debug deployment issues safely
+
+---
+
+## 🔎 Commands Tested
+
+### Check S3 Access
 
     aws s3 ls
-    aws ssm get-parameter  
 
-Confirmed IAM + S3 + SSM functionality.
-
----
-
-# 🔷 PHASE 23 — FRONTEND DEPLOYMENT
-
-## 4️⃣0️⃣ Frontend Launch Template
-Runs app on port 8501.
-
-## 4️⃣1️⃣ Frontend Target Group
-Health Check override: 8501.
-
-## 4️⃣2️⃣ Application Load Balancer
-Public ALB forwards to frontend.
-
-## 4️⃣3️⃣ Frontend ASG
-Private subnets, ELB health checks.
+Confirms:
+- EC2 has correct IAM role
+- S3 permissions are working
 
 ---
 
-# 🔷 PHASE 24 — CDN LAYER (CLOUDFRONT)
+### Check Parameter Store Access
 
-## 4️⃣6️⃣ CloudFront Distribution
-Origin: ALB  
-HTTP → HTTPS redirect  
-Caching enabled  
+    aws ssm get-parameter --name "/cheetah/dev/mysql/host"
 
-Architecture:
+Confirms:
+- ssm:GetParameter permission works
+- KMS decryption works (if SecureString)
+- IAM role correctly attached
 
-User  
-  ↓  
-CloudFront  
-  ↓  
-ALB  
-  ↓  
-Frontend  
-  ↓  
-Backend  
-  ↓  
-RDS  
+---
+
+## 🔄 Validation Flow
+
+    Test EC2
+         ↓
+    Verify IAM Role
+         ↓
+    Verify S3 Access
+         ↓
+    Verify Parameter Store Access
+         ↓
+    Confirm Environment Readiness
+
+---
+# 🔷 PHASE 23 — FRONTEND DEPLOYMENT (PUBLIC LAYER)
+
+After setting up the Backend and Internal NLB, you deployed the **Frontend layer** behind a public Application Load Balancer.
+
+---
+
+## 4️⃣0️⃣ Create Frontend Launch Template
+
+### 📌 Configuration
+
+    Name: dev-fe-lt
+    AMI: Amazon Linux
+    Instance Type: t2.medium
+    Key Pair: Attached
+    Security Group: Frontend SG
+    IAM Role: Attached
+
+---
+
+### 🧾 User Data Script Responsibilities
+
+The EC2 instances automatically:
+
+- Install Python
+- Install required dependencies
+- Download frontend application from S3
+- Create a systemd service
+- Start the application on:
+
+      Port 8501
+
+This ensures automated provisioning during scaling events.
+
+---
+
+## 4️⃣1️⃣ Create Frontend Target Group
+
+### 📌 Configuration
+
+    Protocol: HTTP
+    Port: 8501
+    Health Check Port: Override → 8501
+
+### 🎯 Purpose
+
+The Target Group ensures:
+
+- ALB sends traffic only to healthy instances
+- Health checks verify that the frontend app is running
+
+---
+
+## 4️⃣2️⃣ Create Application Load Balancer (ALB)
+
+### 📌 Configuration
+
+    Name: dev-alb
+    Subnets: Public Subnet 1a, 1b
+    Security Group: ALB SG
+    Listener: HTTP 80
+    Forward to: dev-fe-tg
+
+---
+
+## 🔄 Updated Architecture
+
+    User
+      ↓
+    ALB (Public Subnets)
+      ↓
+    Frontend EC2 (Private Subnets)
+
+The ALB is internet-facing, while frontend instances remain private.
+
+---
+
+## 4️⃣3️⃣ Create Frontend Auto Scaling Group
+
+### 📌 Configuration
+
+    Launch Template: dev-fe-lt
+    Subnets: Private Subnet 1 & 2
+    Target Group: dev-fe-tg
+    Desired Capacity: 1
+    Max Capacity: 1
+    Health Check Type: ELB
+
+### 🎯 Purpose
+
+- Ensures high availability
+- Automatically replaces unhealthy instances
+- Maintains desired capacity
+
+---
+
+# 🔷 TROUBLESHOOTING — INSTANCE TERMINATING ISSUE
+
+---
+
+## 4️⃣4️⃣ Problem
+
+The frontend instance kept terminating automatically.
+
+### 🔎 Root Cause
+
+    Target Group Health Check failing
+            ↓
+    ASG marks instance as Unhealthy
+            ↓
+    ASG terminates instance
+            ↓
+    New instance launched
+            ↓
+    Loop continues
+
+---
+
+## 4️⃣5️⃣ Fix
+
+### 🛠 Steps Followed
+
+1. Login to EC2 using **SSM**
+2. Check application status:
+
+       systemctl status frontend
+
+3. Verify application is listening on:
+
+       Port 8501
+
+4. Correct Target Group health check:
+
+       Override → 8501
+
+5. Ensure Security Group allows traffic:
+   - ALB SG → Frontend SG on Port 8501
+
+---
+
+## ✅ Result After Fix
+
+- Health checks passed
+- Instance status changed to:
+
+      InService
+
+- Auto Scaling stopped terminating the instance
+
+---
+
+## 4️⃣6️⃣ Create CloudFront Distribution
+
+### 📌 Steps
+
+1. Click **Create Distribution**
+2. Set **Origin** as the ALB DNS Name
+3. Configure:
+
+       Viewer Protocol Policy: Redirect HTTP to HTTPS
+
+4. Enable caching behavior
+5. Wait until **Status = Deployed**
+
+---
+
+## 🔄 Updated Architecture
+
+    User
+      ↓
+    CloudFront (CDN Layer)
+      ↓
+    Application Load Balancer (ALB)
+      ↓
+    Frontend Auto Scaling Group (ASG)
+      ↓
+    Internal Network Load Balancer (NLB)
+      ↓
+    Backend Auto Scaling Group (ASG)
+      ↓
+    RDS Database
+
+CloudFront now sits at the edge, handling incoming requests before forwarding them to your ALB.
+
+---
+
+# 🔷 CLOUDFRONT CONCEPTS YOU LEARNED
+
+---
+
+## 🔹 Origin
+
+### 📌 What is an Origin?
+
+An **Origin** is the source from which CloudFront fetches content.
+
+In your setup:
+
+    Origin = Application Load Balancer (ALB)
+
+Whenever content is not available in cache, CloudFront requests it from the ALB.
+
+---
+
+## 🔹 Object Caching
+
+CloudFront caches content at **edge locations** worldwide.
+
+### 📦 What It Controls
+
+- How long content stays cached
+- Based on TTL (Time To Live) settings
+- Controlled by cache policies or origin headers
+
+---
+
+## 🚀 Benefits of Caching
+
+Caching reduces:
+
+- ✔ Latency (faster response time)
+- ✔ Load on backend servers
+- ✔ Infrastructure costs
+- ✔ Traffic to ALB and ASG
+
+---
+
+## 🌍 Request Lifecycle with CDN
+
+    User Request
+         ↓
+    Nearest CloudFront Edge Location
+         ↓
+    Cache Hit → Serve immediately
+         ↓
+    Cache Miss → Fetch from ALB
+         ↓
+    Store in cache (based on TTL)
+
+---
+
+## ✅ Result
+
+- Global content delivery
+- HTTPS enforcement
+- Reduced backend load
+- Improved scalability
+- Better user experience
 
 ---
 
 # 🔷 PHASE 25 — CLOUDFRONT BEHAVIOR CONFIGURATION
 
-## 4️⃣7️⃣ Origin Policy
-HTTP Only to ALB.
+After creating the CloudFront distribution, you customized **Origin** and **Behavior** settings to properly route traffic and support secure, dynamic application functionality.
 
-## 4️⃣8️⃣ Behavior Settings
-- Redirect HTTP → HTTPS  
-- Custom headers for WebSocket  
-- TTL controlled by origin headers  
+---
 
+## 4️⃣7️⃣ Edit CloudFront Origin
+
+### 📌 Configuration
+
+    Origin Protocol Policy: HTTP Only
+
+### 📝 Reason
+
+Your **ALB listener** is configured on:
+
+    Port 80 (HTTP)
+
+So CloudFront communicates with the ALB using HTTP internally.
+
+---
+
+## 🔄 Communication Flow
+
+    User (HTTPS)
+        ↓
+    CloudFront
+        ↓  HTTP
+    Application Load Balancer (Port 80)
+
+CloudFront handles HTTPS encryption at the edge.
+
+---
+
+## 4️⃣8️⃣ Configure CloudFront Behavior
+
+You edited the **Default Behavior** to fine-tune security and caching.
+
+---
+
+### 🔐 Viewer Protocol Policy
+
+    Redirect HTTP to HTTPS
+
+### 🎯 Purpose
+
+- Automatically redirects users from HTTP → HTTPS
+- Ensures secure encrypted access
+- Prevents insecure traffic
+
+---
+
+### 🧠 Cache Key & Origin Request Settings
+
+You configured custom header forwarding.
+
+#### 📌 Included Headers
+
+    Host
+    Origin
+    Sec-WebSocket-Key
+    Sec-WebSocket-Version
+    Sec-WebSocket-Extensions
+
+### 🎯 Purpose
+
+- Support **WebSocket communication**
+- Maintain correct host-based routing
+- Allow dynamic application behavior
+- Ensure proper backend request handling
+
+Without these headers, WebSocket connections may fail.
+
+---
+
+## 📦 Object Caching Configuration
+
+### 📌 Setting Used
+
+    Use Origin Cache Headers
+
+### 📝 What This Means
+
+CloudFront respects cache-control headers sent by the origin.
+
+This controls:
+
+- TTL (Time To Live)
+- Cache expiration
+- Revalidation behavior
+
+---
+
+## ⏳ How Caching Works
+
+    User Request
+         ↓
+    CloudFront Edge Location
+         ↓
+    Cache Hit? → Serve from cache
+         ↓
+    Cache Miss → Forward to ALB
+         ↓
+    Response cached for defined TTL
+
+---
+
+## ✅ Outcome
+
+- ✔ Secure HTTPS enforcement
+- ✔ Proper WebSocket support
+- ✔ Controlled caching strategy
+- ✔ Optimized edge performance
+- ✔ Clean origin communication
+
+ CloudFront distribution is now optimized for secure access, dynamic application behavior, and efficient edge caching.
+ 
 ---
 
 # 🔷 PHASE 26 — HTTPS WITH ACM
 
-## 4️⃣9️⃣ SSL Certificate
-Requested & DNS validated.
-
-Attached to CloudFront.
-
-Fully encrypted traffic.
+To enable secure communication, you configured **HTTPS** using AWS Certificate Manager (ACM) and attached the SSL certificate to your CloudFront distribution.
 
 ---
 
-# 🔷 PHASE 27 — CUSTOM DOMAIN
+## 4️⃣9️⃣ Request SSL Certificate (ACM)
 
-## 5️⃣0️⃣ Add CNAME
-Mapped domain → CloudFront distribution.
+### 📌 Steps
+
+1. Open **AWS Certificate Manager (ACM)**
+2. Request a new certificate
+3. Enter your domain name
+
+### 🌐 Domain Examples
+
+    datastore.bhawna.shop
+    *.bhawna.shop   (Wildcard certificate)
+
+- A **single-domain certificate** secures one specific domain.
+- A **wildcard certificate** secures all subdomains.
 
 ---
 
-# 🔷 PHASE 28 — AWS WAF
+## 🔐 Validation Method
 
-## 5️⃣1️⃣ IP Set  
-## 5️⃣2️⃣ Web ACL (Global)
+    Validation Type: DNS Validation
 
-Attached to CloudFront.
+### How It Works
+
+- ACM provides a DNS validation record (CNAME)
+- Add the record to your DNS provider (Route53 / GoDaddy)
+- Once verified, certificate status becomes **Issued**
+
+DNS validation is recommended because:
+- It supports automatic renewal
+- It is secure and reliable
 
 ---
 
-# 🔷 PHASE 29 — ADVANCED WAF
+## 🔗 Attach Certificate to CloudFront
 
-## 5️⃣3️⃣ IP Allow Rule  
-## 5️⃣4️⃣ IPv6 Support  
-## 5️⃣5️⃣ Custom 403 Page  
-## 5️⃣6️⃣ Geo Blocking  
+After successful validation:
 
-Enhanced security filtering.
+1. Open **CloudFront Distribution**
+2. Edit **General Settings**
+3. Under **Custom SSL Certificate**, select the issued ACM certificate
+4. Save and deploy changes
+
+---
+
+## 🔄 Updated Traffic Flow (Encrypted)
+
+    User
+      ↓  HTTPS (TLS Encryption)
+    CloudFront
+      ↓
+    Application Load Balancer (ALB)
+      ↓
+    Backend Services
+
+All traffic between the user and CloudFront is now encrypted.
+
+---
+
+## 🔒 Security Benefits
+
+- ✔ End-to-end HTTPS encryption
+- ✔ Secure data transmission
+- ✔ Trusted browser padlock icon
+- ✔ Automatic certificate renewal (via DNS validation)
+- ✔ Production-grade security standard
+
+---
+
+## 🌐 Result
+
+Your application is now accessible securely via:
+
+    https://datastore.bhawna.shop
+
+All traffic is encrypted using TLS.
+
+---
+
+# 🔷 PHASE 27 — CUSTOM DOMAIN CONFIGURATION
+
+In this phase, you mapped your **custom domain** to your CloudFront distribution so users can access the application using a clean, branded URL.
+
+---
+
+## 5️⃣0️⃣ Add CNAME Record
+
+### 📌 Steps Followed
+
+1. Copy the **CloudFront Distribution Domain Name**
+
+       Example: dxxxxx.cloudfront.net
+
+2. Go to your DNS provider  
+   (Route53 or GoDaddy)
+
+3. Add a new **CNAME record**
+
+---
+
+## ⚙ DNS Record Configuration
+
+    Type: CNAME
+    Name: yourdomain.com (or subdomain like www/app)
+    Value: dxxxxx.cloudfront.net
+    TTL: 600
+
+### 🔎 Explanation
+
+- **Type CNAME** → Creates an alias to another domain
+- **Name** → Your custom domain
+- **Value** → CloudFront distribution domain
+- **TTL 600** → DNS cache time (10 minutes)
+
+---
+
+## 🔄 DNS Resolution Flow
+
+    User Browser
+          ↓
+    DNS Provider (Route53 / GoDaddy)
+          ↓
+    CloudFront Distribution
+          ↓
+    Origin (ALB / Backend)
+          ↓
+    Application Response
+
+---
+
+## ⏳ After DNS Propagation
+
+Once DNS propagates (may take a few minutes to a few hours):
+
+Your application becomes accessible via:
+
+    https://yourdomain.com
+
+---
+
+## ✅ Result
+
+- ✔ Clean branded domain
+- ✔ Integrated with CloudFront
+- ✔ CDN acceleration enabled
+- ✔ Production-ready configuration
+
+---
+# 🔷 PHASE 28 — AWS WAF (SECURITY HARDENING)
+
+After configuring the CDN, you strengthened security by implementing **AWS WAF** to filter and monitor incoming traffic before it reaches your infrastructure.
+
+---
+
+## 5️⃣1️⃣ Create IP Set
+
+### 📌 Configuration
+
+    Name: dev-wall-set
+    IP Address Format: x.x.x.x/32
+
+### 🔐 Purpose
+
+- Store specific IP addresses
+- Use for allowing or blocking traffic
+- Apply within WAF rules
+
+An **IP/32** format represents a single IP address.
+
+---
+
+## 5️⃣2️⃣ Create Web ACL
+
+### 📌 Configuration
+
+    Scope: Global (CloudFront)
+    Metric Name: dev-traffic-waf
+
+Since CloudFront is a global service, the Web ACL scope must be **Global**.
+
+---
+
+### ➕ Added Rules
+
+1. **IP Set Rule**
+   - Uses `dev-wall-set`
+   - Action: Allow or Block (based on requirement)
+
+2. **AWS Managed Rules**
+   - Protection against common threats:
+     - SQL Injection
+     - Cross-Site Scripting (XSS)
+     - Known malicious patterns
+     - Bad bots
+
+---
+
+### 🔗 Attach Web ACL To
+
+    CloudFront Distribution
+
+Once attached, all incoming traffic is inspected before reaching your origin.
+
+---
+
+## 🔄 Updated Traffic Flow (With WAF Protection)
+
+    User
+      ↓
+    CloudFront
+      ↓
+    WAF (Filters Traffic)
+      ↓
+    Application Load Balancer (ALB)
+      ↓
+    Frontend Auto Scaling Group (ASG)
+      ↓
+    Internal Network Load Balancer (NLB)
+      ↓
+    Backend Auto Scaling Group (ASG)
+      ↓
+    RDS Database
+
+---
+
+## 🛡 What WAF Now Protects Against
+
+- ✔ Malicious IP addresses
+- ✔ SQL injection attacks
+- ✔ Cross-site scripting (XSS)
+- ✔ Common web exploits
+- ✔ Suspicious traffic patterns
+
+---
+
+## 🎯 Security Impact
+
+- Traffic filtering at the edge (CloudFront level)
+- Reduced load on backend infrastructure
+- Early threat mitigation
+- Improved monitoring via CloudWatch metrics
+
+---
+
+# 🔷 PHASE 29 — ADVANCED WAF CONFIGURATION
+
+After attaching the **Web ACL** to your CloudFront distribution, you refined security rules to enforce stricter access control and improve visibility.
+
+---
+
+## 5️⃣3️⃣ Configure IP Allow Rule
+
+### 📌 Steps
+
+1. Select your **CloudFront Distribution**
+2. Go to **Web ACL**
+3. Click **Add Rule**
+4. Choose **IP Set**
+
+---
+
+### ⚙ Configuration
+
+    IPSet Name: dev-allow-ips
+    IP Address: your-public-ip/32
+    Action: Allow
+    Default Action: Block
+
+### 🔐 What This Means
+
+- Only the IP addresses inside the IP Set are allowed
+- All other traffic is blocked (because Default Action = Block)
+
+---
+
+## 🔄 Access Flow with IP Restriction
+
+    User Request
+         ↓
+    CloudFront
+         ↓
+    AWS WAF (IP Allow Rule)
+         ↓
+    Allowed IP → Forward to Origin
+    Other IPs  → Block (403)
+
+This ensures your application is accessible only from trusted networks.
+
+---
+
+## 🔍 WAF Logging & Troubleshooting
+
+If access to your site is unexpectedly blocked:
+
+### Steps:
+
+1. Go to **WAF**
+2. Open your **Web ACL**
+3. Navigate to **Logging**
+4. Review blocked requests
+5. Identify which rule triggered the block
+
+### Why It Helps
+
+- Detect false positives
+- Debug rule misconfigurations
+- Monitor suspicious activity
+- Improve rule accuracy
+
+---
+
+## 5️⃣4️⃣ Add IPv6 IP Set
+
+To support modern networks, you created an additional IP Set.
+
+### 📌 Configuration
+
+    IP Set Type: IPv6
+    IP Address: your-ipv6-address/128
+    Attached to existing rule builder
+
+### 🎯 Purpose
+
+Ensures compatibility for both:
+
+- ✔ IPv4
+- ✔ IPv6
+
+Without IPv6 configuration, IPv6 traffic could bypass or be incorrectly blocked.
+
+---
+
+## 5️⃣5️⃣ Custom 403 Response Page
+
+To improve user experience when access is denied:
+
+### 📌 Steps
+
+1. Go to **WAF → Custom Response Bodies**
+2. Add your custom HTML code
+3. Set:
+
+        Response Code: 403
+
+4. Attach the custom response to your Block rule
+
+---
+
+### 🖥 Result
+
+Instead of showing a generic AWS error page, users see:
+
+    A branded custom HTML 403 page
+
+Benefits:
+
+- Professional appearance
+- Better UX
+- Clear messaging
+- Branding consistency
+
+---
+
+## 5️⃣6️⃣ Add Geo-Blocking Rule
+
+Added an additional regional security layer using Rule Builder.
+
+### 📌 Configuration
+
+    Statement Type: Inspect
+    Condition: Origin Country
+    Action: Allow or Block specific country codes
+
+---
+
+### 🌍 How It Works
+
+    Incoming Request
+           ↓
+    WAF checks Country Code
+           ↓
+    Allowed Country → Forward
+    Blocked Country → 403 Response
+
+---
+
+## ✅ Security Improvements Achieved
+
+- ✔ Strict IP-based access control
+- ✔ IPv4 + IPv6 compatibility
+- ✔ Custom branded error handling
+- ✔ Geo-based filtering
+- ✔ Advanced monitoring via logging
 
 ---
 
 # 🔷 PHASE 30 — FINAL DNS RESOLUTION
 
-## 5️⃣7️⃣ DNS Concept  
-## 5️⃣8️⃣ CNAME Record (GoDaddy/Route53)
+This phase connects your **custom domain** to your **CloudFront distribution**, making your application publicly accessible using a clean URL.
 
 ---
 
-# 🔷 PHASE 31 — ALTERNATE DOMAIN (CLOUDFRONT)
+## 5️⃣7️⃣ DNS Resolution Concept
 
-## 5️⃣9️⃣ Added Alternate Domain Name
-Attached validated ACM certificate.
+### 🌐 What is DNS Resolution?
+
+DNS Resolution is the process of:
+
+    Mapping your custom domain name
+                ↓
+    To your CloudFront distribution domain
+
+Instead of users accessing:
+
+    https://dxxxxx.cloudfront.net
+
+They can now access:
+
+    https://app.yourdomain.com
+
+DNS acts as the translator between human-friendly domain names and CloudFront’s distribution endpoint.
+
+---
+
+## 🔄 DNS Flow Overview
+
+    User Browser
+          ↓
+    DNS Provider (GoDaddy)
+          ↓
+    CloudFront Distribution
+          ↓
+    Application (via ALB / Backend)
+
+---
+
+## 5️⃣8️⃣ Add CNAME Record (GoDaddy Example)
+
+### 📌 Steps
+
+1. Copy your **CloudFront Distribution Domain Name**
+
+       Example: dxxxxx.cloudfront.net
+
+2. Go to **GoDaddy → DNS Management**
+
+3. Click **Add Record**
+
+---
+
+### ⚙ Configuration
+
+    Type: CNAME
+    Host: app
+    Points to: dxxxxx.cloudfront.net
+    TTL: 600
+
+Explanation:
+
+- **Type CNAME** → Creates an alias
+- **Host "app"** → Creates subdomain (app.yourdomain.com)
+- **Points to** → CloudFront distribution domain
+- **TTL 600** → DNS cache time (10 minutes)
+
+---
+
+## ⏳ After DNS Propagation
+
+Once DNS propagates (usually within minutes to a few hours):
+
+Your application becomes accessible via:
+
+    https://app.yourdomain.com
+
+---
+
+## ✅ What Happens Internally
+
+- DNS maps `app.yourdomain.com` → CloudFront domain
+- CloudFront receives the request
+- CloudFront forwards traffic to origin (ALB or S3)
+- User receives the application securely via HTTPS
+
+--- 
+```
+---
+
+# 🔷 PHASE 31 — ALTERNATE DOMAIN NAME (CLOUDFRONT)
+
+After completing DNS setup, the next step is configuring a proper **custom domain** for your CloudFront distribution.
+
+---
+
+## 5️⃣9️⃣ Add Alternate Domain Name (CNAME) in CloudFront
+
+### 📌 Steps
+
+1. Go to **CloudFront**
+2. Open **Distribution**
+3. Click **Edit**
+4. Navigate to **General Settings**
+5. Add **Alternate Domain Name (CNAME)**
+
+   Example:
+
+        datastore.bhawna.shop
+
+6. Attach the **validated ACM certificate**
+7. Click **Save**
+8. Wait for deployment to complete
+
+---
+
+## 🔷 DNS Resolution Flow (Internal Working)
+
+When a user enters:
+
+    datastore.bhawna.shop
+
+The request follows this resolution path:
+
+    Browser
+       ↓
+    DNS (GoDaddy / Route53)
+       ↓
+    CloudFront Distribution
+       ↓
+    Application Load Balancer (ALB)
+       ↓
+    Frontend Application
+
+---
+
+## 📖 How It Works
+
+- DNS maps your **custom domain** to the **CloudFront domain name**
+- CloudFront receives the request
+- The request is forwarded to the **ALB**
+- ALB routes traffic to the **Frontend**
+- The response travels back through the same path to the user
+
+---
+
+## ✅ Result
+
+Your application is now accessible via:
+
+    https://datastore.bhawna.shop
+
+With:
+- ✔ Custom domain
+- ✔ SSL (ACM Certificate)
+- ✔ Secure HTTPS delivery
+- ✔ CloudFront global edge caching
 
 ---
 
@@ -453,23 +2440,154 @@ Attached validated ACM certificate.
 
 ---
 
-# 🔷 PHASE 33 — BASTION HOST
+# 🔷 PHASE 33 — BASTION HOST SETUP (DATABASE ACCESS)
 
-## 6️⃣1️⃣ Bastion EC2
-Public subnet, SSH from personal IP only.
+To securely access a **private RDS instance**, a **Bastion Host** (jump server) is configured inside a public subnet.
 
-## 6️⃣2️⃣ RDS SG Updated
-Allowed connection only from Bastion SG.
+This ensures that:
+- The database remains private
+- Direct public access to RDS is blocked
+- Only authorized SSH access is allowed
 
 ---
 
-# 🔷 PHASE 34 — CONNECT RDS
+## 6️⃣1️⃣ Create Bastion EC2 Instance
 
-Used MySQL Workbench over SSH.
+### 📌 Configuration
 
-Validated:
-- RDS not publicly accessible  
-- Secure tunnel working  
+- **Subnet:** Public Subnet (1a)
+- **Key Pair:** Existing or newly created key pair
+- **Security Group Rules:**
+
+        SSH (Port 22) → Source: Your Public IP only
+
+### 🎯 Purpose
+
+The Bastion Host acts as a:
+
+- Secure **jump server**
+- Gateway to access private resources
+- Controlled access point for database connectivity
+
+---
+
+## 🏗 Architecture Overview
+
+    Internet (Your IP)
+           ↓
+    Bastion Host (Public Subnet)
+           ↓
+    RDS (Private Subnet)
+
+The Bastion host is the only machine exposed for SSH access.
+
+---
+
+## 6️⃣2️⃣ Configure Security Groups
+
+### 🔐 RDS Security Group Configuration
+
+Allowed:
+
+    Type: MySQL / PostgreSQL (DB Port)
+    Source: Bastion Security Group
+
+This means:
+
+- ❌ RDS does NOT allow traffic from the internet
+- ❌ RDS does NOT allow traffic from random EC2 instances
+- ✅ RDS allows traffic ONLY from the Bastion Host
+
+---
+
+## 🔄 Secure Access Flow
+
+    Developer Machine
+           ↓ (SSH)
+    Bastion Host
+           ↓ (DB Port)
+    RDS Instance
+
+You SSH into the Bastion host first, then connect to the database from there.
+
+---
+
+## ✅ Security Benefits
+
+- ✔ Database remains private
+- ✔ Controlled access via Security Groups
+- ✔ Reduced attack surface
+- ✔ Industry-standard production setup
+
+---
+
+# 🔷 PHASE 34 — CONNECT RDS USING WORKBENCH
+
+After setting up the Bastion Host, the next step was connecting to the private RDS instance using **MySQL Workbench** via SSH tunneling.
+
+---
+
+## 🛠 MySQL Workbench Configuration
+
+### 📌 Connection Method
+
+    Method: Standard TCP/IP over SSH
+
+---
+
+### 🔐 SSH Configuration (Bastion Access)
+
+    SSH Hostname: <Bastion Public IP>
+    SSH Username: ec2-user
+    SSH Key File: <Your Key Pair (.pem)>
+
+This establishes a secure tunnel from your local machine to the Bastion host.
+
+---
+
+### 🗄 Database Configuration (RDS)
+
+    MySQL Hostname: <RDS Endpoint>
+    Username: admin
+    Password: <DB Password>
+    Port: 3306 (default)
+
+Once configured:
+
+- Click **Test Connection**
+- Connection established successfully ✅
+
+---
+
+## 🔄 Connection Flow (Behind the Scenes)
+
+    Your Laptop (Workbench)
+           ↓ SSH Tunnel
+    Bastion Host (Public Subnet)
+           ↓ MySQL Port 3306
+    RDS Instance (Private Subnet)
+
+The database remains private while access is securely tunneled.
+
+---
+
+## 🔐 Security Validation
+
+Ensured the following:
+
+- ✔ RDS is **NOT publicly accessible**
+- ✔ RDS is accessible **only via Bastion Host**
+- ✔ Security Groups restrict DB access to Bastion SG only
+- ✔ No direct internet exposure to database
+
+---
+
+## 🛡 Why This Is Secure
+
+- SSH encryption protects credentials
+- RDS endpoint remains private
+- No open database ports to the internet
+- Access fully controlled via Security Groups
 
 ---
 
