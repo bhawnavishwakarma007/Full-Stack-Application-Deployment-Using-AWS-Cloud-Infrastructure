@@ -1,470 +1,453 @@
-# 🚀 FULL STACK AWS PROJECT – END TO END FROM SCRATCH
+# 🚀 FULL STACK AWS PROJECT – MANUAL DEPLOYMENT (STEP-BY-STEP)
 
-Production-grade full stack deployment on AWS with high availability, monitoring, scaling, CDN, and security hardening.
+This project was created manually using the AWS Console following a structured order — from networking to application deployment, monitoring, scaling, CDN, and security hardening.
 
 ---
-
 # Architecture Diagram
 
 ![Architecture](images/architecture.png)
-
 ---
 
-# 🔷 PHASE 1 — NETWORK FOUNDATION
+# 🔷 PHASE 1 — NETWORK SETUP
 
 ## 1️⃣ Create VPC
 
-**Name:** dev-vpc  
-**CIDR:** 10.0.0.0/16  
+Service Used: Amazon VPC
 
-This isolates your entire infrastructure inside a private virtual network.
+Name: dev-vpc  
+CIDR Block: 10.0.0.0/16  
+
+This creates the isolated virtual network for the entire infrastructure.
 
 ---
 
 ## 2️⃣ Create Subnets (Multi-AZ)
 
-### Public Subnets (For ALB & NAT)
+### Public Subnets
 
-- 10.0.0.0/24  (us-east-1a)  
-- 10.0.1.0/24  (us-east-1b)  
-- 10.0.2.0/24  (us-east-1c)  
+dev-pub-sub-1 → us-east-1a → 10.0.0.0/24  
+dev-pub-sub-2 → us-east-1b → 10.0.1.0/24  
+dev-pub-sub-3 → us-east-1c → 10.0.2.0/24  
 
-### Private Subnets (For EC2 Application)
+### Private Subnets
 
-- 10.0.3.0/24  
-- 10.0.4.0/24  
-- 10.0.5.0/24  
+dev-pvt-sub-1 → us-east-1a → 10.0.3.0/24  
+dev-pvt-sub-2 → us-east-1b → 10.0.4.0/24  
+dev-pvt-sub-3 → us-east-1c → 10.0.5.0/24  
 
-Multi-AZ design ensures high availability.
+Ensures high availability across three Availability Zones.
 
 ---
 
-## 3️⃣ Internet Gateway
+## 3️⃣ Create Internet Gateway
 
-Create Internet Gateway → Attach to VPC  
+Service Used: Internet Gateway
+
+- Created Internet Gateway  
+- Attached it to dev-vpc  
 
 Purpose:  
-Allows public subnets to access the internet.
+Allows public subnets to communicate with the internet.
 
 ---
 
-## 4️⃣ NAT Gateway
+## 4️⃣ Create NAT Gateway
 
-Create NAT Gateway in a Public Subnet  
-Attach an Elastic IP  
+Service Used: NAT Gateway
+
+- Created manually  
+- Placed inside Public Subnet (1a)  
+- Attached Elastic IP  
 
 Purpose:  
-Private instances can access the internet (SSM, S3, updates) without being publicly exposed.
+Allows private instances to access the internet securely without public exposure.
 
 ---
 
-## 5️⃣ Route Tables
+## 5️⃣ Configure Route Tables
 
 ### Public Route Table
 
-    0.0.0.0/0 → Internet Gateway
+Route:  
+0.0.0.0/0 → Internet Gateway  
 
-Attach to Public Subnets.
+Attached to:  
+dev-pub-sub-1  
+dev-pub-sub-2  
+dev-pub-sub-3  
 
 ### Private Route Table
 
-    0.0.0.0/0 → NAT Gateway
+Route:  
+0.0.0.0/0 → NAT Gateway  
 
-Attach to Private Subnets.
-
----
-
-# 🔷 PHASE 2 — SECURITY LAYER
-
-## 6️⃣ Create Security Groups
-
-### ALB SG
-Inbound: Port 80 from 0.0.0.0/0
-
-### Frontend SG
-Port 8501 from ALB SG
-
-### NLB SG (Internal)
-TCP 80 from Frontend SG
-
-### Backend SG
-Port 8084 from NLB SG
-
-### RDS SG
-Port 3306 from Backend SG
-
-Layered security ensures:
-- No backend exposure
-- No database public access
-- Strict east-west traffic control
+Attached to:  
+dev-pvt-sub-1  
+dev-pvt-sub-2  
+dev-pvt-sub-3  
 
 ---
 
-# 🔷 PHASE 3 — DATABASE
+## 6️⃣ Enable VPC Flow Logs
 
-## 7️⃣ Create RDS (MySQL)
+Enabled VPC Flow Logs to:
 
-Engine: MySQL  
-Multi-AZ: Recommended  
-Subnets: Private only  
+- Monitor traffic  
+- Understand networking behavior  
+- Debug connectivity issues  
+
+---
+
+# 🔷 PHASE 2 — SECURITY GROUP DESIGN (LAYERED SECURITY)
+
+Security was designed in strict layered architecture.
+
+## 7️⃣ Create Security Groups
+
+### ALB Security Group
+
+HTTP (80) → 0.0.0.0/0  
+
+### Frontend Security Group
+
+TCP 8501 → From ALB Security Group  
+
+### NLB Security Group
+
+TCP 80 → From Frontend Security Group  
+
+### Backend Security Group
+
+TCP 8084 → From NLB Security Group  
+
+### RDS Security Group
+
+MySQL / Aurora → Port 3306  
+Source → Backend Security Group  
+
+This ensures:
+
+- No direct database exposure  
+- No public backend access  
+- Strict service-to-service communication  
+
+---
+
+# 🔷 PHASE 3 — DATABASE CONFIGURATION
+
+## 8️⃣ Create DB Subnet Group
+
+Included:
+
+- Private Subnet 1a  
+- Private Subnet 1b  
+- Private Subnet 1c  
+
+Ensures Multi-AZ database placement.
+
+---
+
+## 9️⃣ Create RDS Instance
+
+Engine: MySQL / Aurora  
 Public Access: Disabled  
-Encryption: Enabled (KMS)  
+Subnet Group: Private Subnets  
+Security Group: RDS SG  
+Logging: Enabled  
+Encryption: Enabled using KMS  
 
-Save the RDS endpoint for application configuration.
+### 🔐 Encryption Configuration
 
----
-
-# 🔷 PHASE 4 — SECRETS MANAGEMENT
-
-## 8️⃣ Store DB Credentials in Parameter Store
-
-Create parameters:
-
-    /cheetah/dev/mysql/host
-    /cheetah/dev/mysql/username
-    /cheetah/dev/mysql/password (SecureString)
-
-Encryption:
-
-- aws/ssm  
-  OR  
-- Custom KMS key  
-
-Ensures no hardcoded credentials in code or user data.
+Encryption at Rest → Data encrypted before storage  
+Encryption in Transit → Data encrypted while moving between services  
 
 ---
 
-# 🔷 PHASE 5 — S3 FOR APPLICATION ARTIFACTS
+# 🔷 PHASE 4 — ACCESS MANAGEMENT & SECRETS
 
-## 9️⃣ Create S3 Buckets
+## 🔟 Configure Systems Manager Access
 
-- cheetah-dev-be-app-bucket  
-- cheetah-dev-fe-app-bucket  
+Configured SSM so that:
 
-Upload:
+- EC2 instances in private subnet can be accessed  
+- No Bastion Host required  
+- No public IP required  
 
-- Backend JAR  
-- Frontend app.py  
+Secure login into private instances using Session Manager.
 
 ---
 
-# 🔷 PHASE 6 — IAM ROLES
+## 1️⃣1️⃣ Create Parameters in Parameter Store
 
-## 🔟 Create IAM Role for EC2
+### Database Host
 
-Attach Policies:
+Name: /cheetah/dev/mysql/host  
+Type: String  
+Value: RDS Endpoint  
+
+### Database Username
+
+Name: /cheetah/dev/mysql/username  
+Type: String  
+Value: admin  
+
+### Database Password
+
+Name: /cheetah/dev/mysql/password  
+Type: SecureString  
+Encryption: KMS  
+Value: RDS Password  
+
+Ensures:
+
+- No hardcoded credentials  
+- Secure encrypted storage  
+
+---
+
+# 🔷 PHASE 5 — APPLICATION ARTIFACT STORAGE
+
+## 1️⃣2️⃣ Create S3 Bucket
+
+Uploaded:
+
+- Backend JAR file  
+
+Bucket accessed by EC2 during deployment.
+
+---
+
+# 🔷 PHASE 6 — IAM ROLE FOR EC2
+
+## 1️⃣3️⃣ Create IAM Role (For EC2)
+
+Attached Managed Policies:
 
 - AmazonSSMManagedInstanceCore  
+- S3 Full Access  
 - CloudWatchAgentServerPolicy  
-- AmazonS3ReadOnlyAccess  
+
+Created Custom Policy:
+
+Permissions:
+
 - ssm:GetParameter  
 - kms:Decrypt  
 
-Attach this role to EC2 via Launch Template.
+Purpose:
+
+- Fetch secure DB credentials  
+- Access S3 bucket  
+- Allow SSM login  
+- Allow log publishing  
 
 ---
 
-# 🔷 PHASE 7 — BACKEND DEPLOYMENT
+# 🔷 PHASE 7 — BACKEND DEPLOYMENT TEST
 
-## 1️⃣1️⃣ Create Launch Template (Backend)
+## 1️⃣4️⃣ Launch EC2 Instance (Testing)
 
-Include:
+Instance Type: t2.medium  
+Subnet: Private Subnet 2  
+IAM Role: Attached  
+Security Group: Backend SG  
 
-- Amazon Linux  
-- Instance Type  
+Used for manual verification before automation.
+
+---
+
+# 🔷 PHASE 8 — CREATE LAUNCH TEMPLATE (BACKEND)
+
+## 1️⃣5️⃣ Create Launch Template
+
+Configured:
+
+- Instance Type: t2.medium  
+- Key Pair  
+- Backend Security Group  
 - IAM Role  
 - User Data script  
 
-### Backend User Data Performs:
+User Data performs:
 
 - Install Java  
-- Install CloudWatch Agent  
-- Fetch DB credentials from SSM  
 - Download JAR from S3  
+- Fetch DB credentials from SSM  
 - Start Spring Boot application  
-- Configure log shipping  
-
-Log Path:
-
-    /var/log/app/datastore.log
 
 ---
 
-## 1️⃣2️⃣ Create Backend Target Group
+# 🔷 PHASE 9 — CREATE TARGET GROUP (BACKEND)
+
+## 1️⃣6️⃣ Create Target Group
 
 Protocol: TCP  
 Port: 8084  
-Health Check Protocol: HTTP  
-Health Check Path: /actuator  
 
----
-
-## 1️⃣3️⃣ Create Internal NLB
-
-- Attach Private Subnets  
-- Attach Backend Target Group  
-
----
-
-## 1️⃣4️⃣ Create Backend Auto Scaling Group
-
-- Launch Template  
-- Private Subnets  
-- Attach to NLB  
-- Desired Capacity: 1  
-- Health Check Type: ELB  
-
----
-
-# 🔷 PHASE 8 — FRONTEND DEPLOYMENT
-
-## 1️⃣5️⃣ Create Launch Template (Frontend)
-
-User Data performs:
-
-- Install Python  
-- Create virtual environment  
-- Install streamlit  
-- Download app.py from S3  
-- Create systemd service  
-- Set API_URL to Backend NLB DNS  
-- Start service  
-
-Runs on:
-
-Port 8501
-
----
-
-## 1️⃣6️⃣ Create Frontend Target Group
+Health Check:
 
 Protocol: HTTP  
-Port: 8501  
+Port Override: 8084  
+Success Code: 200–499  
 
 ---
 
-## 1️⃣7️⃣ Create Application Load Balancer
+# 🔷 PHASE 10 — BACKEND LOAD BALANCING & AUTO SCALING
 
-- Public Subnets  
-- Attach Frontend Target Group  
-- Listener: HTTP 80  
+## 1️⃣7️⃣ Create Internal NLB
 
----
+Type: Internal  
+Subnets: Private Subnet 1 & 2  
+Listener: TCP 80  
+Forward to: Backend Target Group  
 
-## 1️⃣8️⃣ Create Frontend Auto Scaling Group
+Purpose:
 
-- Private Subnets  
-- Attach to ALB  
-- Health Check Type: ELB  
-
----
-
-# 🔷 PHASE 9 — MONITORING & ALERTING
-
-## 1️⃣9️⃣ CloudWatch Log Group
-
-Created by CloudWatch Agent:
-
-    /datastore/app
+Expose backend only inside VPC.
 
 ---
 
-## 2️⃣0️⃣ Create Metric Filter
+## 1️⃣8️⃣ Create Backend ASG
 
-Pattern:
-
-    ERROR
-
-Namespace:
-
-    be-cw-ns
-
-Metric Name:
-
-    log-error
+Launch Template: Backend LT  
+Subnets: Private Subnet 1 & 2  
+Attach to Target Group  
+Health Check Type: ELB  
+Desired Capacity: 1  
 
 ---
 
-## 2️⃣1️⃣ Create CloudWatch Alarm
+# 🔷 COMPLETE MONITORING PIPELINE
 
-Condition:
-
-    log-error >= 1
-
-Period: 1 minute  
-
-Action:
-
-Publish to SNS
-
----
-
-## 2️⃣2️⃣ Create SNS Topic
-
-Type: Standard  
-
-Access Policy:
-
-Allow only:
-
-    cloudwatch.amazonaws.com
-
-With Condition:
-
-    SourceArn = specific alarm ARN
+Backend Application Logs  
+        ↓  
+CloudWatch Log Group  
+        ↓  
+Metric Filter (ERROR)  
+        ↓  
+CloudWatch Alarm  
+        ↓  
+SNS Topic  
+        ↓  
+Lambda Function  
+        ↓  
+Slack Channel  
 
 ---
 
-## 2️⃣3️⃣ Create Lambda Function
+# 🔷 AUTO SCALING LIFECYCLE STATES
 
-Runtime: Python 3.12  
+Normal EC2:
 
-Environment Variable:
+Pending → Running → Terminating → Terminated  
 
-    slackHookUrl
+ASG Lifecycle:
 
-### Lambda Logic
+Launch  
+   ↓  
+Pending  
+   ↓  
+Pending:Wait  
+   ↓  
+Pending:Proceed  
+   ↓  
+InService  
+   ↓  
+Terminating  
+   ↓  
+Terminating:Wait  
+   ↓  
+Terminating:Proceed  
+   ↓  
+Terminated  
 
-- Receive SNS event  
-- Parse AlarmName  
-- Send Slack webhook message  
+Lifecycle Hooks used during:
 
----
+- Launch  
+- Termination  
 
-## 2️⃣4️⃣ Subscribe Lambda to SNS
-
-SNS → Subscription → Lambda  
-
-Test:
-
-Manually insert log line:
-
-    ERROR test
-
-Slack receives alert successfully.
-
----
-
-# 🔷 PHASE 10 — CDN + SECURITY HARDENING
-
-## 2️⃣5️⃣ Create CloudFront Distribution
-
-Origin:
-
-    ALB DNS
-
-Viewer Protocol Policy:
-
-    Redirect HTTP to HTTPS
+Heartbeat Timeout: 3600 seconds  
 
 ---
 
-## 2️⃣6️⃣ Configure WebSocket Headers
+# 🔷 SCHEDULED SCALING
 
-Origin Request Policy:
+Scale Up (Weekdays 6 AM):
 
-- Host  
-- Origin  
-- Sec-WebSocket-Key  
-- Sec-WebSocket-Version  
-- Sec-WebSocket-Extensions  
+0 6 * * 1-5  
 
-OR  
+Scale Down (Weekdays 7:30 PM):
 
-Forward All Viewer Headers
+30 19 * * 1-5  
+
+Cost optimization strategy implemented.
 
 ---
 
-## 2️⃣7️⃣ Add AWS WAF
+# 🔷 CLOUD ARCHITECTURE (FINAL)
 
-Create Web ACL  
-
-Rules:
-
-- IP Block  
-- Geo Restriction  
-- AWS Managed Rules  
-
-Add Custom 403 HTML Response (styled page).  
-
-Attach WAF to CloudFront.
-
----
-
-# 🔷 PHASE 11 — DNS
-
-## 2️⃣8️⃣ Add Custom Domain
-
-Using Route53 or GoDaddy:
-
-    CNAME → CloudFront domain
-    TTL → 600
-
-Attach ACM certificate for HTTPS.
+User  
+  ↓  
+CloudFront  
+  ↓  
+WAF  
+  ↓  
+ALB  
+  ↓  
+Frontend ASG  
+  ↓  
+Internal NLB  
+  ↓  
+Backend ASG  
+  ↓  
+RDS  
 
 ---
 
-# 🔷 PHASE 12 — AUTO SCALING OPTIMIZATION
+# 🔷 SECURITY HARDENING
 
-## 2️⃣9️⃣ Add Scaling Policies
-
-- Target Tracking (CPU 50%)  
-- Step Scaling  
-
----
-
-## 3️⃣0️⃣ Add Scheduled Actions (Cost Optimization)
-
-Example:
-
-Scale Down at Night:
-
-    Capacity: 0
-    Cron: 0 19 * * ?
-
-Scale Up in Morning:
-
-    Capacity: 1
-    Cron: 0 6 * * ?
+- WAF IP Allow/Block Rules  
+- Geo Blocking  
+- Custom 403 Response  
+- HTTPS via ACM  
+- KMS Encryption  
+- Least Privilege IAM  
+- Bastion Host for DB access  
+- Parameter Store SecureString  
 
 ---
 
-# 🔷 FINAL ARCHITECTURE FLOW
+# 🔷 FINAL VALIDATION
 
-## Application Flow
-
-    User
-      ↓
-    CloudFront
-      ↓
-    WAF
-      ↓
-    ALB
-      ↓
-    Frontend ASG
-      ↓
-    Internal NLB
-      ↓
-    Backend ASG
-      ↓
-    RDS
+✔ High Availability (Multi-AZ)  
+✔ Auto Scaling Enabled  
+✔ Monitoring & Alerting Working  
+✔ Slack Real-Time Alerts  
+✔ CDN Integrated  
+✔ HTTPS Enforced  
+✔ WAF Protection Active  
+✔ Database Private  
+✔ Secure Access via Bastion & SSM  
+✔ Production-grade systemd services  
 
 ---
 
-## Monitoring Flow
+# 🎯 RESULT
 
-    Backend Logs
-      ↓
-    CloudWatch
-      ↓
-    Metric Filter
-      ↓
-    Alarm
-      ↓
-    SNS
-      ↓
-    Lambda
-      ↓
-    Slack
+A complete production-style AWS full stack architecture built manually via AWS Console with:
 
----
+Networking  
+Security  
+Database  
+Auto Scaling  
+Monitoring  
+Alerting  
+CDN  
+WAF  
+DNS  
+SSL  
+Cost Optimization  
+Lifecycle Management  
+Encryption  
+
+End-to-end cloud infrastructure implementation from scratch.
