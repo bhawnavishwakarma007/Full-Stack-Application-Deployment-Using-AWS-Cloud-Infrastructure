@@ -2357,8 +2357,6 @@ Your application becomes accessible via:
 - CloudFront forwards traffic to origin (ALB or S3)
 - User receives the application securely via HTTPS
 
---- 
-```
 ---
 
 # 🔷 PHASE 31 — ALTERNATE DOMAIN NAME (CLOUDFRONT)
