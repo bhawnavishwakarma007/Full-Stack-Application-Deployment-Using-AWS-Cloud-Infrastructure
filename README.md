@@ -1187,37 +1187,33 @@ This ensures:
 
 # 🔷 PHASE 18 — STORAGE OPTIMIZATION (EBS)
 
-This phase focused on optimizing storage cost while maintaining required performance.
+This phase focused on optimizing storage cost while maintaining the required application performance.
 
 ---
 
 ## 3️⃣5️⃣ EBS Volume Optimization
 
-### 📌 Initial Configuration
+### 📌 Configuration
 
     Volume Type: gp3
 
-### 🔄 Updated Configuration
-
-    Volume Type: gp2
-
----
-
 ### 🎯 Purpose
 
-- Reduce storage cost
-- Maintain sufficient IOPS for application workload
+- Reduce storage costs
+- Maintain consistent application performance
+- Provide baseline 3,000 IOPS without increasing volume size
 - Optimize infrastructure expenses
 
-Since the workload did not require provisioned IOPS tuning, switching to **gp2** provided a cost-effective alternative.
+The application did not require additional provisioned IOPS or throughput beyond the default gp3 performance. Using gp3 provided a cost-effective storage solution while maintaining the required performance for the workload.
 
 ---
 
 ## 💰 Cost Optimization Strategy
 
-- Avoid over-provisioned storage
-- Match volume performance to actual workload
-- Reduce recurring AWS billing
+- Use gp3 instead of gp2 for lower storage costs
+- Avoid unnecessary provisioned IOPS and throughput
+- Match storage performance to application requirements
+- Reduce recurring AWS storage costs
 
 ---
 
